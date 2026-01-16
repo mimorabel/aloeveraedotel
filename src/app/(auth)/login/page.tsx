@@ -14,10 +14,10 @@ export default function LoginPage() {
         {/* right side */}
         <div className="w-full md:w-1/2 p-8 sm:p-12 flex items-center justify-center bg-white">
           <div className="w-full max-w-md h-112.5 flex flex-col justify-between">
-            <div>
+            {/* <div>
               <h2 className="text-3xl font-bold text-gray-800">Login</h2>
               <p className="text-gray-500 mt-2">Silakan masuk ke akun Anda</p>
-            </div>
+            </div> */}
 
             {/* Tengah ke Bawah: Form Fields */}
             {/* <form className="space-y-4">
