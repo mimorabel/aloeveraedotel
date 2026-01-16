@@ -1,0 +1,244 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+}
+
+// --- ENUMS (Untuk standarisasi status) ---
+
+enum Role {
+  SUPERADMIN
+  ADMIN
+  FRONTDESK
+  HOUSEKEEPING
+  LAUNDRY
+}
+
+enum RoomStatus {
+  AVAILABLE
+  OCCUPIED
+  DIRTY        // Perlu dibersihkan (Housekeeping)
+  MAINTENANCE
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  CHECKED_OUT
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+enum LaundryStatus {
+  RECEIVED
+  WASHING
+  IRONING
+  READY
+  DELIVERED
+}
+
+// --- MODULE: USER MANAGEMENT & ANGKATAN ---
+
+model Angkatan {
+  id           String    @id @default(cuid())
+  namaAngkatan String    // Misal: "Batch 2024 - Ganjil"
+  tahunMasuk   Int
+  tahunKeluar  Int
+  isActive     Boolean   @default(true) // Fitur untuk non-aktifkan massal
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  users        User[]
+
+  @@map("angkatan")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  password     String    // Pastikan di-hash (bcrypt/argon2)
+  email        String?   @unique
+  role         Role      @default(FRONTDESK)
+  
+  // Relasi ke Angkatan
+  angkatanId   String?
+  angkatan     Angkatan? @relation(fields: [angkatanId], references: [id])
+
+  // Relasi Operasional (Audit Log / Assignment)
+  reservationsCreated Reservation[] // Staff yg handle reservasi
+  housekeepingTasks   HousekeepingLog[]
+  laundryOrders       LaundryOrder[]
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("users")
+}
+
+// --- MODULE: MASTER DATA (Kamar & Tamu) ---
+
+model RoomType {
+  id          String   @id @default(cuid())
+  name        String   // Deluxe, Suite, Standard
+  price       Decimal  @db.Decimal(10, 2)
+  capacity    Int
+  description String?
+  
+  rooms       Room[]
+  
+  @@map("room_types")
+}
+
+model Room {
+  id          String     @id @default(cuid())
+  number      String     @unique // Nomor kamar (101, 102)
+  floor       Int
+  status      RoomStatus @default(AVAILABLE)
+  
+  typeId      String
+  roomType    RoomType   @relation(fields: [typeId], references: [id])
+
+  reservations Reservation[]
+  housekeepingLogs HousekeepingLog[]
+
+  @@map("rooms")
+}
+
+model Guest {
+  id             String   @id @default(cuid())
+  fullName       String
+  identityNumber String   @unique // KTP/Passport
+  phone          String?
+  email          String?
+  address        String?
+  
+  reservations   Reservation[]
+
+  @@map("guests")
+}
+
+// --- MODULE: FRONT DESK (Reservasi & Transaksi) ---
+
+model Reservation {
+  id              String            @id @default(cuid())
+  checkInDate     DateTime
+  checkOutDate    DateTime
+  status          ReservationStatus @default(PENDING)
+  totalAmount     Decimal           @db.Decimal(12, 2)
+  
+  // Relasi
+  guestId         String
+  guest           Guest             @relation(fields: [guestId], references: [id])
+  
+  roomId          String
+  room            Room              @relation(fields: [roomId], references: [id])
+  
+  staffId         String?           // Staff yang input
+  staff           User?             @relation(fields: [staffId], references: [id])
+
+  invoices        Invoice[]
+  laundryOrders   LaundryOrder[]    // Relasi Laundry ke Reservasi
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@map("reservations")
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  invoiceNumber String        @unique // INV-20240101-001
+  amount        Decimal
+  status        PaymentStatus @default(UNPAID)
+  issuedAt      DateTime      @default(now())
+  
+  reservationId String
+  reservation   Reservation   @relation(fields: [reservationId], references: [id])
+
+  @@map("invoices")
+}
+
+// --- MODULE: HOUSEKEEPING (Inventory & Room Status) ---
+
+model InventoryItem {
+  id        String   @id @default(cuid())
+  name      String   // Sabun, Handuk, Sprei
+  stock     Int      @default(0)
+  category  String   // Amenities / Utensils
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("inventory_items")
+}
+
+model HousekeepingLog {
+  id          String   @id @default(cuid())
+  roomId      String
+  room        Room     @relation(fields: [roomId], references: [id])
+  
+  staffId     String
+  staff       User     @relation(fields: [staffId], references: [id])
+  
+  action      String   // "Cleaned Room", "Restocked Amenities"
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@map("housekeeping_logs")
+}
+
+// --- MODULE: LAUNDRY ---
+
+model LaundryService {
+  id          String   @id @default(cuid())
+  name        String   // Cuci Kering, Setrika, Dry Clean
+  unit        String   // kg, pcs
+  pricePerUnit Decimal
+  
+  orderItems  LaundryOrderItem[]
+
+  @@map("laundry_services")
+}
+
+model LaundryOrder {
+  id            String        @id @default(cuid())
+  status        LaundryStatus @default(RECEIVED)
+  totalPrice    Decimal
+  
+  reservationId String        // Terhubung ke tamu yg menginap
+  reservation   Reservation   @relation(fields: [reservationId], references: [id])
+  
+  staffId       String?       // Staff laundry yg input
+  staff         User?         @relation(fields: [staffId], references: [id])
+  
+  items         LaundryOrderItem[]
+  
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@map("laundry_orders")
+}
+
+model LaundryOrderItem {
+  id              String         @id @default(cuid())
+  quantity        Int
+  subtotal        Decimal
+  
+  orderId         String
+  order           LaundryOrder   @relation(fields: [orderId], references: [id])
+  
+  serviceId       String
+  service         LaundryService @relation(fields: [serviceId], references: [id])
+
+  @@map("laundry_order_items")
+}
